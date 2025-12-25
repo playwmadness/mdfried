@@ -508,7 +508,7 @@ fn run<'a>(
                                     KeyCode::Backspace => {
                                         model.scroll_by_mul /= 10;
                                     }
-                                    KeyCode::Char(x) if '0' <= x && x <= '9' => {
+                                    KeyCode::Char(x) if ('0'..='9').contains(&x) => {
                                         let x = x as i16 - '0' as i16;
                                         model.scroll_by_mul = model
                                             .scroll_by_mul
