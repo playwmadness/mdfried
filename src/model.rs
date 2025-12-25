@@ -31,6 +31,7 @@ pub struct Model<'a, 'b> {
     pub bg: Option<BgColor>,
     sources: WidgetSources<'a>,
     pub scroll: u16,
+    pub scroll_by_mul: i16,
     pub cursor: Cursor,
     pub log_snapshot: Option<flexi_logger::Snapshot>,
     original_file_path: Option<PathBuf>,
@@ -58,6 +59,7 @@ impl<'a, 'b: 'a> Model<'a, 'b> {
             screen_size,
             config,
             scroll: 0,
+            scroll_by_mul: 0,
             cursor: Cursor::default(),
             sources: WidgetSources::default(),
             cmd_tx,
@@ -270,6 +272,8 @@ impl<'a, 'b: 'a> Model<'a, 'b> {
     }
 
     pub fn scroll_by(&mut self, lines: i16) {
+        let lines = lines.saturating_mul(self.scroll_by_mul.max(1));
+        self.scroll_by_mul = 0;
         self.scroll = min(
             self.scroll.saturating_add_signed(lines),
             self.total_lines()
@@ -466,6 +470,7 @@ mod tests {
             screen_size: (80, 20).into(),
             config: UserConfig::default().into(),
             scroll: 0,
+            scroll_by_mul: 0,
             cursor: Cursor::default(),
             sources: WidgetSources::default(),
             cmd_tx,
