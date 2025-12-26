@@ -394,11 +394,11 @@ fn run<'a>(
                                     let needle = mode.needle.clone();
                                     model.add_searches(Some(needle));
                                 }
-                                KeyCode::Esc if model.scroll_by_mul == 0 => {
+                                KeyCode::Esc if model.movement_count == 0 => {
                                     model.cursor = Cursor::None;
                                 }
                                 KeyCode::Esc => {
-                                    model.scroll_by_mul = 0;
+                                    model.movement_count = 0;
                                 }
                                 KeyCode::Enter => {
                                     mode.accepted = true;
@@ -437,26 +437,24 @@ fn run<'a>(
                                     KeyCode::Char('b') | KeyCode::PageUp => {
                                         model.scroll_by(-page_scroll_count);
                                     }
-                                    KeyCode::Char('G') if model.scroll_by_mul == 0 => {
+                                    KeyCode::Char('G') if model.movement_count == 0 => {
                                         model.scroll = model.total_lines().saturating_sub(
                                             page_scroll_count as u16 + 1, // Why +1?
                                         );
                                     }
                                     KeyCode::Char('g' | 'G') => {
-                                        model.scroll = model.scroll_by_mul.max(1) as u16 - 1;
-                                        model.scroll_by_mul = 0;
+                                        model.scroll = model.movement_count.max(1) as u16 - 1;
+                                        model.movement_count = 0;
                                     }
                                     KeyCode::Char('/') => {
                                         model.cursor = Cursor::Search(SearchState::default(), None);
-                                        model.scroll_by_mul = 0;
+                                        model.movement_count = 0;
                                     }
                                     KeyCode::Char('n') => {
                                         model.cursor_next();
-                                        model.scroll_by_mul = 0;
                                     }
                                     KeyCode::Char('N') => {
                                         model.cursor_prev();
-                                        model.scroll_by_mul = 0;
                                     }
                                     KeyCode::F(11) => {
                                         model.log_snapshot = match model.log_snapshot {
@@ -492,7 +490,7 @@ fn run<'a>(
                                             }
                                         }
                                     }
-                                    KeyCode::Esc if model.scroll_by_mul == 0 => {
+                                    KeyCode::Esc if model.movement_count == 0 => {
                                         if let Cursor::Search(SearchState { accepted, .. }, _) =
                                             model.cursor
                                             && accepted
@@ -503,15 +501,15 @@ fn run<'a>(
                                         }
                                     }
                                     KeyCode::Esc => {
-                                        model.scroll_by_mul = 0;
+                                        model.movement_count = 0;
                                     }
                                     KeyCode::Backspace => {
-                                        model.scroll_by_mul /= 10;
+                                        model.movement_count /= 10;
                                     }
                                     KeyCode::Char(x) if x.is_ascii_digit() => {
                                         let x = x as i16 - '0' as i16;
-                                        model.scroll_by_mul = model
-                                            .scroll_by_mul
+                                        model.movement_count = model
+                                            .movement_count
                                             .saturating_mul(10)
                                             .saturating_add(x);
                                     }
@@ -653,10 +651,10 @@ fn view(model: &Model, frame: &mut Frame) {
     }
 
     match &model.cursor {
-        _ if model.scroll_by_mul > 0 => {
+        _ if model.movement_count > 0 => {
             let mut line = Line::default();
-            let mut span = Span::from(model.scroll_by_mul.to_string()).fg(Color::Indexed(250));
-            if model.scroll_by_mul == i16::MAX {
+            let mut span = Span::from(model.movement_count.to_string()).fg(Color::Indexed(250));
+            if model.movement_count == i16::MAX {
                 span = span.fg(Color::Indexed(167));
             }
             line.spans.push(span);
