@@ -331,7 +331,7 @@ impl<'a, 'b: 'a> Model<'a, 'b> {
                 None => {
                     assert_eq!(
                         self.movement_count, 0,
-                        "shouldn't be possible to commit search at have non-zero movement count"
+                        "shouldn't be possible to commit search and have non-zero movement count"
                     );
                     *pointer = WidgetSources::find_first_cursor(
                         self.sources.iter(),
