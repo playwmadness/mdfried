@@ -645,7 +645,8 @@ fn view(model: &Model, frame: &mut Frame) {
             }
         }
         y += source.height as i16;
-        if y >= inner_area.height as i16 {
+        if y >= inner_area.height as i16 - 1 {
+            // Do not render into last line, nor beyond area.
             break;
         }
     }
@@ -733,7 +734,7 @@ mod tests {
         let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>();
         let (event_tx, event_rx) = mpsc::channel::<Event>();
 
-        let picker = Picker::from_fontsize((1, 2));
+        let picker = Picker::halfblocks();
         assert_eq!(picker.protocol_type(), ProtocolType::Halfblocks);
         let worker = worker_thread(
             None,

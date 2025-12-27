@@ -1,88 +1,14 @@
+mod blocks;
 mod links;
 
 use ratatui::text::Line;
 use ratskin::RatSkin;
-use regex::Regex;
 
-use crate::{DocumentId, Event, WidgetSource, widget_sources::WidgetSourceData};
-
-// Crude "pre-parsing" of markdown by lines.
-// Headers are always on a line of their own.
-// Images are only processed if it appears on a line by itself, to avoid having to deal with text
-// wrapping around some area.
-#[derive(Debug, PartialEq)]
-enum Block {
-    Header(u8, String),
-    Image(String, String),
-    Markdown(String),
-}
-
-fn split_headers_and_images(text: &str) -> Vec<Block> {
-    // Regex to match lines starting with 1-6 `#` characters
-    let header_re = Regex::new(r"^(#+)\s*(.*)").expect("regex");
-    // Regex to match standalone image lines: ![alt](url)
-    let image_re = Regex::new(r"^!\[(.*?)\]\((.*?)\)$").expect("regex");
-    // Regex to match beginning or end of code fence
-    let codefence_re = Regex::new(r"^ {0,3}(`{3,}|~{3,})").expect("regex");
-
-    let mut blocks = Vec::new();
-    let mut current_block = String::new();
-    let mut current_codefence: Option<String> = None;
-
-    for line in text.lines() {
-        if let Some(codefence_str) = &current_codefence {
-            if !current_block.is_empty() {
-                current_block.push('\n');
-            }
-            current_block.push_str(line);
-            if let Some(captures) = codefence_re.captures(line) {
-                // End of codefence must match start, with at least as many characters
-                if captures[1].starts_with(codefence_str) {
-                    current_codefence = None;
-                }
-            }
-        } else if let Some(captures) = header_re.captures(line) {
-            // If there's an ongoing block, push it as a plain text block
-            if !current_block.is_empty() {
-                blocks.push(Block::Markdown(current_block.clone()));
-                current_block.clear();
-            }
-            // Push the header as (level, text)
-            let level = captures[1].len().min(6) as u8;
-            let text = captures[2].to_string();
-            blocks.push(Block::Header(level, text));
-        } else if let Some(captures) = image_re.captures(line) {
-            // If there's an ongoing block, push it as a plain text block
-            if !current_block.is_empty() {
-                blocks.push(Block::Markdown(current_block.clone()));
-                current_block.clear();
-            }
-            // Push the image as (alt_text, url)
-            let alt_text = captures[1].to_string();
-            let url = captures[2].to_string();
-            blocks.push(Block::Image(alt_text, url));
-        } else if let Some(captures) = codefence_re.captures(line) {
-            if !current_block.is_empty() {
-                current_block.push('\n');
-            }
-            current_block.push_str(line);
-            current_codefence = Some(captures[1].to_string());
-        } else {
-            // Accumulate lines that are neither headers nor images
-            if !current_block.is_empty() {
-                current_block.push('\n');
-            }
-            current_block.push_str(line);
-        }
-    }
-
-    // Push the final block if there's remaining content
-    if !current_block.is_empty() {
-        blocks.push(Block::Markdown(current_block));
-    }
-
-    blocks
-}
+use crate::{
+    DocumentId, Event, WidgetSource,
+    markdown::blocks::{Block, split_headers_and_images},
+    widget_sources::{BigText, WidgetSourceData},
+};
 
 pub fn parse<'a>(
     text: &str,
@@ -113,9 +39,14 @@ pub fn parse<'a>(
             Block::Header(tier, text) => {
                 needs_space = false;
                 if has_text_size_protocol {
+                    let (n, d) = BigText::size_ratio(tier);
+                    let scaled_with = width / 2 * u16::from(d) / u16::from(n);
+
                     // Leverage ratskin/termimad's line-wrapping feature.
+                    // TODO: this is probably inefficient, find something else that simply
+                    // word-wraps.
                     let madtext = RatSkin::parse_text(&text);
-                    for line in skin.parse(madtext, width / 2) {
+                    for line in skin.parse(madtext, scaled_with) {
                         let text = line.to_string();
                         events.push(send_parsed(
                             document_id,
@@ -189,128 +120,6 @@ mod tests {
     };
     use pretty_assertions::assert_eq;
     use ratskin::RatSkin;
-
-    #[test]
-    fn split_headers_and_images() {
-        let blocks = markdown::split_headers_and_images(
-            r#"
-# header
-
-paragraph
-
-paragraph
-
-# header
-
-paragraph
-paragraph
-
-# header
-
-paragraph
-
-# header
-"#,
-        );
-        assert_eq!(
-            blocks,
-            vec![
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Markdown("paragraph\n\nparagraph\n".to_owned()),
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Markdown("paragraph\nparagraph\n".to_owned()),
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Markdown("paragraph\n".to_owned()),
-                markdown::Block::Header(1, "header".to_owned()),
-            ]
-        );
-    }
-
-    #[test]
-    fn split_headers_and_images_without_space() {
-        let blocks = markdown::split_headers_and_images(
-            r#"
-# header
-paragraph
-# header
-# header
-paragraph
-# header
-"#,
-        );
-        assert_eq!(6, blocks.len());
-        assert_eq!(
-            blocks,
-            vec![
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Markdown("paragraph".to_owned()),
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Markdown("paragraph".to_owned()),
-                markdown::Block::Header(1, "header".to_owned()),
-            ]
-        );
-    }
-
-    #[test]
-    fn codefence() {
-        let blocks = markdown::split_headers_and_images(
-            r#"
-# header
-
-paragraph
-
-```c
-#ifdef FOO
-bar();
-#endif
-```
-
-paragraph
-
-  ~~~~
-  x("
-  ~~~
-  ");
-  #define Y
-  z();
-  ~~~~
-
-# header
-
-paragraph
-"#,
-        );
-        assert_eq!(
-            blocks,
-            vec![
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Markdown(
-                    r#"paragraph
-
-```c
-#ifdef FOO
-bar();
-#endif
-```
-
-paragraph
-
-  ~~~~
-  x("
-  ~~~
-  ");
-  #define Y
-  z();
-  ~~~~
-"#
-                    .to_owned()
-                ),
-                markdown::Block::Header(1, "header".to_owned()),
-                markdown::Block::Markdown("paragraph".to_owned()),
-            ]
-        );
-    }
 
     #[test]
     fn parse_one_basic_line() {
@@ -566,5 +375,83 @@ paragraph
             })
             .collect();
         assert_eq!(vec!["http://a.com", "http://b.com"], urls, "finds all URLs");
+    }
+
+    #[test]
+    fn parse_header_wrapping_tier_1() {
+        let events: Vec<Event> = parse(
+            "# 1234567890",
+            &RatSkin::default(),
+            DocumentId::default(),
+            10,
+            true,
+        )
+        .collect();
+        assert_eq!(2, events.len());
+
+        let Event::Parsed(
+            _,
+            WidgetSource {
+                data: WidgetSourceData::Header(text, tier),
+                ..
+            },
+        ) = &events[0]
+        else {
+            panic!("expected Header");
+        };
+        assert_eq!(1, *tier);
+        assert_eq!("12345", text);
+
+        let Event::Parsed(
+            _,
+            WidgetSource {
+                data: WidgetSourceData::Header(text, tier),
+                ..
+            },
+        ) = &events[1]
+        else {
+            panic!("expected Header");
+        };
+        assert_eq!(1, *tier);
+        assert_eq!("67890", text);
+    }
+
+    #[test]
+    fn parse_header_wrapping_tier_4() {
+        let events: Vec<Event> = parse(
+            "#### 1234567890",
+            &RatSkin::default(),
+            DocumentId::default(),
+            10,
+            true,
+        )
+        .collect();
+        assert_eq!(2, events.len());
+
+        let Event::Parsed(
+            _,
+            WidgetSource {
+                data: WidgetSourceData::Header(text, tier),
+                ..
+            },
+        ) = &events[0]
+        else {
+            panic!("expected Header");
+        };
+        assert_eq!(4, *tier);
+        assert_eq!("1234567", text);
+
+        let Event::Parsed(
+            _,
+            WidgetSource {
+                data: WidgetSourceData::Header(text, tier),
+                ..
+            },
+        ) = &events[1]
+        else {
+            panic!("expected Header");
+        };
+        assert_eq!(4, *tier);
+        assert_eq!("890", text);
     }
 }
