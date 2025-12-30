@@ -2,6 +2,7 @@ mod config;
 mod cursor;
 mod debug;
 mod error;
+mod input;
 mod markdown;
 mod model;
 mod setup;
@@ -27,8 +28,7 @@ use ratatui::{
     DefaultTerminal, Frame, Terminal,
     crossterm::{
         event::{
-            self, DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind, KeyModifiers,
-            MouseEventKind,
+            self, DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers, MouseEventKind,
         },
         tty::IsTty as _,
     },
@@ -44,7 +44,7 @@ use setup::{SetupResult, setup_graphics};
 
 use crate::{
     config::Config,
-    cursor::{Cursor, CursorPointer, SearchState},
+    cursor::{Cursor, CursorPointer},
     error::Error,
     model::{DocumentId, Model},
     watch::watch,
@@ -354,7 +354,6 @@ impl Display for Event {
 // Just a width key, to discard events for stale screen widths.
 // type WidthEvent<'a> = (u16, Event<'a>);
 
-#[expect(clippy::too_many_lines)]
 fn run(
     terminal: &mut DefaultTerminal,
     mut model: Model,
@@ -364,8 +363,6 @@ fn run(
     let mut screen_size = terminal.size()?;
 
     loop {
-        let page_scroll_count = model.inner_height(screen_size.height) as i16 - 2;
-
         let (had_events, _) = model.process_events(screen_size.width)?;
 
         let mut had_input = false;
@@ -376,155 +373,17 @@ fn run(
         })? {
             had_input = true;
             match event::read()? {
-                event::Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press {
-                        match model.cursor {
-                            Cursor::Search(ref mut mode, _) if !mode.accepted => match key.code {
-                                KeyCode::Char('/') if mode.accepted => {
-                                    *mode = SearchState::default();
-                                    model.add_searches(None);
-                                }
-                                KeyCode::Char(c) => {
-                                    let mut needle = std::mem::take(&mut mode.needle);
-                                    needle.push(c);
-                                    model.add_searches(Some(&needle));
-                                    let Cursor::Search(mode, _) = &mut model.cursor else {
-                                        unreachable!("model.add_searches should not modify cursor");
-                                    };
-                                    mode.needle = needle;
-                                }
-                                KeyCode::Backspace => {
-                                    let mut needle = std::mem::take(&mut mode.needle);
-                                    needle.pop();
-                                    model.add_searches(Some(&needle));
-                                    let Cursor::Search(mode, _) = &mut model.cursor else {
-                                        unreachable!("model.add_searches should not modify cursor");
-                                    };
-                                    mode.needle = needle;
-                                }
-                                KeyCode::Esc if model.movement_count == 0 => {
-                                    model.cursor = Cursor::None;
-                                }
-                                KeyCode::Esc => {
-                                    model.movement_count = 0;
-                                }
-                                KeyCode::Enter => {
-                                    mode.accepted = true;
-                                    model.cursor_next();
-                                }
-                                _ => {}
-                            },
-                            _ => {
-                                match key.code {
-                                    KeyCode::Char('q') => {
-                                        return Ok(());
-                                    }
-                                    KeyCode::Char('c')
-                                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
-                                    {
-                                        return Ok(());
-                                    }
-                                    KeyCode::Char('r') => {
-                                        model.reload(screen_size)?;
-                                    }
-                                    KeyCode::Char('j') | KeyCode::Down => {
-                                        model.scroll_by(1);
-                                    }
-                                    KeyCode::Char('k') | KeyCode::Up => {
-                                        model.scroll_by(-1);
-                                    }
-                                    KeyCode::Char('d') => {
-                                        model.scroll_by((page_scroll_count + 1) / 2);
-                                    }
-                                    KeyCode::Char('u') => {
-                                        model.scroll_by(-(page_scroll_count + 1) / 2);
-                                    }
-                                    KeyCode::Char('f' | ' ') | KeyCode::PageDown => {
-                                        model.scroll_by(page_scroll_count);
-                                    }
-                                    KeyCode::Char('b') | KeyCode::PageUp => {
-                                        model.scroll_by(-page_scroll_count);
-                                    }
-                                    KeyCode::Char('G') if model.movement_count == 0 => {
-                                        model.scroll = model.total_lines().saturating_sub(
-                                            page_scroll_count as u16 + 1, // Why +1?
-                                        );
-                                    }
-                                    KeyCode::Char('g' | 'G') => {
-                                        model.scroll = model.movement_count.max(1) as u16 - 1;
-                                        model.movement_count = 0;
-                                    }
-                                    KeyCode::Char('/') => {
-                                        model.cursor = Cursor::Search(SearchState::default(), None);
-                                        model.movement_count = 0;
-                                    }
-                                    KeyCode::Char('n') => {
-                                        model.cursor_next();
-                                    }
-                                    KeyCode::Char('N') => {
-                                        model.cursor_prev();
-                                    }
-                                    KeyCode::F(11) => {
-                                        model.log_snapshot = match model.log_snapshot {
-                                            None => Some(flexi_logger::Snapshot::new()),
-                                            Some(_) => None,
-                                        };
-                                    }
-                                    KeyCode::Enter => {
-                                        if let Cursor::Links(CursorPointer { id, index }) =
-                                            model.cursor
-                                        {
-                                            let url = model.sources().find_map(|source| {
-                                                if source.id == id {
-                                                    let WidgetSourceData::Line(_, extras) =
-                                                        &source.data
-                                                    else {
-                                                        return None;
-                                                    };
+                event::Event::Key(key) if key.kind.is_press() => {
+                    if key.code == KeyCode::Char('c')
+                        && key.modifiers.contains(KeyModifiers::CONTROL)
+                    {
+                        return Ok(());
+                    }
 
-                                                    match extras.get(index) {
-                                                        Some(LineExtra::Link(url, _, _)) => {
-                                                            Some(url.clone())
-                                                        }
-                                                        _ => None,
-                                                    }
-                                                } else {
-                                                    None
-                                                }
-                                            });
-                                            if let Some(url) = url {
-                                                log::debug!("open link_cursor {url}");
-                                                model.open_link(url)?;
-                                            }
-                                        }
-                                    }
-                                    KeyCode::Esc if model.movement_count == 0 => {
-                                        if let Cursor::Search(SearchState { accepted, .. }, _) =
-                                            model.cursor
-                                            && accepted
-                                        {
-                                            model.cursor = Cursor::None;
-                                        } else if let Cursor::Links(_) = model.cursor {
-                                            model.cursor = Cursor::None;
-                                        }
-                                    }
-                                    KeyCode::Esc => {
-                                        model.movement_count = 0;
-                                    }
-                                    KeyCode::Backspace => {
-                                        model.movement_count /= 10;
-                                    }
-                                    KeyCode::Char(x) if x.is_ascii_digit() => {
-                                        let x = x as i16 - '0' as i16;
-                                        model.movement_count = model
-                                            .movement_count
-                                            .saturating_mul(10)
-                                            .saturating_add(x);
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
+                    had_input = model.on_key_press(key.code)?;
+
+                    if !had_input && key.code == KeyCode::Char('q') {
+                        return Ok(());
                     }
                 }
                 event::Event::Resize(new_width, new_height) => {
@@ -541,9 +400,13 @@ fn run(
                     MouseEventKind::ScrollDown => {
                         model.scroll_by(2);
                     }
-                    _ => {}
+                    _ => {
+                        had_input = false;
+                    }
                 },
-                _ => {}
+                _ => {
+                    had_input = false;
+                }
             }
         }
 
@@ -607,15 +470,17 @@ fn view(model: &Model, frame: &mut Frame) {
                                 cursor_positioned = Some((x, y));
                             }
                         }
-                        Cursor::Search(SearchState { .. }, pointer) => {
+                        _ => {
                             for (i, extra) in extras.iter().enumerate() {
                                 if let LineExtra::SearchMatch(start, end, text) = extra {
                                     let x = frame_area.x + padding.left + (*start as u16);
                                     let width = *end as u16 - *start as u16;
                                     let area = Rect::new(x, y, width, 1);
                                     let mut link_overlay_widget = Paragraph::new(text.clone());
-                                    link_overlay_widget = if let Some(CursorPointer { id, index }) =
-                                        pointer
+                                    link_overlay_widget = if let Cursor::Search(
+                                        _,
+                                        Some(CursorPointer { id, index }),
+                                    ) = &model.cursor
                                         && source.id == *id
                                         && i == *index
                                     {
@@ -628,7 +493,6 @@ fn view(model: &Model, frame: &mut Frame) {
                                 }
                             }
                         }
-                        _ => {}
                     }
                 }
                 WidgetSourceData::Image(_, proto) => {
@@ -659,49 +523,34 @@ fn view(model: &Model, frame: &mut Frame) {
         }
     }
 
-    match &model.cursor {
-        _ if model.movement_count > 0 => {
+    let (statusline, at_end) = model
+        .input_handler
+        .status()
+        .map(|x| (x, true))
+        .or_else(|| {
             let mut line = Line::default();
-            let mut span = Span::from(model.movement_count.to_string()).fg(Color::Indexed(250));
-            if model.movement_count == i16::MAX {
-                span = span.fg(Color::Indexed(167));
+            match &model.cursor {
+                Cursor::Links(_) => {
+                    line.spans.push(Span::from("Links").fg(Color::Indexed(32)));
+                }
+                Cursor::Search(mode, _) => {
+                    line.spans.push(Span::from("/").fg(Color::Indexed(148)));
+                    line.spans
+                        .push(Span::from(&mode.needle).fg(Color::Indexed(148)));
+                }
+                _ => return None,
             }
-            line.spans.push(span);
-            let width = line.width() as u16;
-            let searchbar = Paragraph::new(line);
-            frame.render_widget(searchbar, Rect::new(0, frame_area.height - 1, width, 1));
-            frame.set_cursor_position((width, frame_area.height - 1));
-        }
-        Cursor::None => {
-            frame.set_cursor_position((0, frame_area.height - 1));
-        }
-        Cursor::Links(_) => {
-            let mut line = Line::default();
-            line.spans.push(Span::from("Links").fg(Color::Indexed(32)));
-            let width = line.width() as u16;
-            let searchbar = Paragraph::new(line);
-            frame.render_widget(searchbar, Rect::new(0, frame_area.height - 1, width, 1));
-            if cursor_positioned.is_none() {
-                frame.set_cursor_position((0, frame_area.height - 1));
-            }
-        }
-        Cursor::Search(mode, _) => {
-            let mut line = Line::default();
-            line.spans.push(Span::from("/").fg(Color::Indexed(148)));
-            let mut needle = Span::from(mode.needle.clone());
-            if mode.accepted {
-                needle = needle.fg(Color::Indexed(148));
-            }
-            line.spans.push(needle);
-            let width = line.width() as u16;
-            let searchbar = Paragraph::new(line);
-            frame.render_widget(searchbar, Rect::new(0, frame_area.height - 1, width, 1));
-            if !mode.accepted {
-                frame.set_cursor_position((width, frame_area.height - 1));
-            } else if cursor_positioned.is_none() {
-                frame.set_cursor_position((0, frame_area.height - 1));
-            }
-        }
+            Some((line, false))
+        })
+        .unwrap_or_default();
+
+    let width = statusline.width() as u16;
+    let searchbar = Paragraph::new(statusline);
+    frame.render_widget(searchbar, Rect::new(0, frame_area.height - 1, width, 1));
+    if at_end {
+        frame.set_cursor_position((width, frame_area.height - 1));
+    } else if cursor_positioned.is_none() {
+        frame.set_cursor_position((0, frame_area.height - 1));
     }
 }
 

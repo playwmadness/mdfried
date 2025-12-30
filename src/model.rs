@@ -7,6 +7,7 @@ use std::{
 };
 
 use ratatui::{
+    crossterm::event::KeyCode,
     layout::{Rect, Size},
     style::Stylize as _,
     text::{Line, Span},
@@ -14,7 +15,6 @@ use ratatui::{
 };
 use regex::RegexBuilder;
 
-use crate::setup::BgColor;
 use crate::{
     Cmd,
     config::{Config, PaddingConfig},
@@ -26,6 +26,7 @@ use crate::{
     cursor::Cursor,
     widget_sources::{WidgetSource, WidgetSourceData},
 };
+use crate::{input::InputHandler, setup::BgColor};
 
 pub struct Model {
     pub bg: Option<BgColor>,
@@ -40,6 +41,7 @@ pub struct Model {
     cmd_tx: Sender<Cmd>,
     event_rx: Receiver<Event>,
     document_id: DocumentId,
+    pub input_handler: InputHandler,
     #[cfg(test)]
     pub pending_image_count: usize,
 }
@@ -66,9 +68,17 @@ impl Model {
             event_rx,
             log_snapshot: None,
             document_id: DocumentId::default(),
+            input_handler: Default::default(),
             #[cfg(test)]
             pending_image_count: 0,
         }
+    }
+
+    pub fn on_key_press(&mut self, key: KeyCode) -> Result<bool, Error> {
+        let mut hdl = std::mem::take(&mut self.input_handler);
+        let res = hdl.on_key_press(self, key);
+        self.input_handler = hdl;
+        res
     }
 
     pub fn reload(&mut self, screen_size: Size) -> Result<(), Error> {
@@ -274,8 +284,7 @@ impl Model {
     }
 
     fn reload_search(&mut self) {
-        let old_cursor = std::mem::take(&mut self.cursor);
-        match old_cursor {
+        match std::mem::take(&mut self.cursor) {
             Cursor::None => {}
             Cursor::Links(_) => {
                 // TODO: Search state is lost on reparse
@@ -475,6 +484,7 @@ mod tests {
             cmd_tx,
             event_rx,
             log_snapshot: None,
+            input_handler: Default::default(),
             document_id: DocumentId::default(),
             pending_image_count: 0,
         }

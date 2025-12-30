@@ -30,5 +30,4 @@ pub struct CursorPointer {
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct SearchState {
     pub needle: String,
-    pub accepted: bool,
 }
